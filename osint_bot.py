@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RamsEye OSINT v2.0 — CLEAN FINAL
+# RamsEye OSINT v3.0 — FINAL (LLAMA 4 SCOUT + FLASK + FIXES)
 
 import telebot
 import subprocess
@@ -18,6 +18,7 @@ from urllib.parse import quote
 import phonenumbers
 from phonenumbers import carrier, geocoder
 from bs4 import BeautifulSoup
+from flask import Flask
 
 # ========== КОНФИГ ==========
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -25,14 +26,26 @@ bot = telebot.TeleBot(TOKEN)
 
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Новая быстрая модель!
 
 task_semaphore = threading.Semaphore(2)
 user_step = {}
 
+# ========== FLASK ВЕБ-СЕРВЕР (чтобы Render не вырубал) ==========
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "RamsEye OSINT Bot v3.0 is alive", 200
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+threading.Thread(target=run_web, daemon=True).start()
+
 # ========== АВТОПИНГ ==========
 def self_ping():
-    url = "https://ramseye-bot.onrender.com"  # ЗАМЕНИ НА СВОЙ URL
+    url = "https://ramseye-bot.onrender.com"
     while True:
         time.sleep(300)
         try:
@@ -164,8 +177,7 @@ def darknet_search(query):
         for link in soup.find_all('a', href=True):
             if '.onion' in link['href']:
                 results.append(link['href'])
-                if len(results) >= 5:
-                    break
+                if len(results) >= 5: break
     except:
         pass
     if results:
@@ -229,7 +241,7 @@ def process_groq_question(message):
         bot.send_message(message.chat.id, "Отменено.")
         return
     bot.send_chat_action(message.chat.id, 'typing')
-    bot.send_message(message.chat.id, "🤔 Думаю... (Llama 3.3 70B)")
+    bot.send_message(message.chat.id, "🤔 Думаю... (Llama 4 Scout)")
     answer = ask_groq(message.text)
     if len(answer) > 4000:
         fname = f"groq_{int(time.time())}.txt"
@@ -239,9 +251,9 @@ def process_groq_question(message):
             bot.send_document(message.chat.id, f, caption="🧠 Ответ Groq")
         os.remove(fname)
     else:
-        bot.send_message(message.chat.id, f"🧠 <b>Llama 3.3:</b>\n\n{answer}", parse_mode='HTML')
+        bot.send_message(message.chat.id, f"🧠 <b>Llama 4 Scout:</b>\n\n{answer}", parse_mode='HTML')
 
-# ========== INLINE-МЕНЮ ==========
+# ========== INLINE-МЕНЮ (КРАСИВОЕ) ==========
 def tools_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -264,23 +276,26 @@ def tools_callback(call):
         bot.answer_callback_query(call.id, "Меню закрыто")
         return
     
-    bot.answer_callback_query(call.id, f"Выбрано: {call.data}")
+    bot.answer_callback_query(call.id, f"🔍 Выбран {call.data}")
+    # Очищаем старый шаг, если был (фикс бага!)
+    if call.from_user.id in user_step:
+        del user_step[call.from_user.id]
     bot.send_message(call.message.chat.id, f"🔎 Введи данные для {call.data}:")
     user_step[call.from_user.id] = call.data
 
 # ========== ГЛАВНОЕ МЕНЮ ==========
 def main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("🔍 OSINT Search", "🧠 Нейросеть")
+    markup.add("🔍 OSINT Search", "🧠 RamsEye AI")
     markup.add("📊 История", "ℹ️ Помощь")
     return markup
 
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(message.chat.id,
-        "🛰 <b>RamsEye OSINT v2.0</b>\n\n"
+        "🦾 <b>RamsEye OSINT v3.0</b>\n\n"
         "🔍 <b>OSINT Search</b> — все инструменты в подменю\n"
-        "🧠 <b>Нейросеть</b> — Llama 3.3 70B\n"
+        "🧠 <b>RamsEye AI</b> — Llama 4 Scout (быстрая нейросеть)\n"
         "📊 <b>История</b> — последние поиски\n"
         "ℹ️ <b>Помощь</b> — справка\n\n"
         "👇 Выбери действие",
@@ -342,7 +357,7 @@ def handle_text(message):
 
     if t == "🔍 OSINT Search":
         bot.send_message(message.chat.id, "🔍 <b>Выбери инструмент:</b>", parse_mode='HTML', reply_markup=tools_menu())
-    elif t == "🧠 Нейросеть":
+    elif t == "🧠 RamsEye AI":
         bot.send_message(message.chat.id, "🧠 Задай вопрос (или /cancel):")
         user_step[uid] = "groq"
     elif t == "📊 История":
@@ -360,11 +375,12 @@ def handle_text(message):
             bot.send_message(message.chat.id, "📭 История пуста")
     elif t == "ℹ️ Помощь":
         bot.send_message(message.chat.id,
-            "<b>📖 RamsEye OSINT Bot v2.0</b>\n\n"
+            "<b>📖 RamsEye OSINT Bot v3.0</b>\n\n"
             "🔍 OSINT Search — ник, почта, телефон, IP, даркнет, дорки, WhatsApp, WHOIS\n"
-            "🧠 Нейросеть — Llama 3.3 70B (Groq)\n\n"
+            "🧠 RamsEye AI — нейросеть Llama 4 Scout (Groq)\n\n"
             "Все данные хранятся локально.\n"
-            "🔒 Валидация ввода, безопасный вызов команд",
+            "🔒 Валидация ввода, безопасный вызов команд\n"
+            "🌐 Веб-сервер активен (порт 8080)",
             parse_mode='HTML')
     elif t == "/cancel":
         if uid in user_step:
@@ -377,8 +393,8 @@ def handle_text(message):
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    print("🚀 RamsEye OSINT v2.0 — CLEAN FINAL")
-    print("=" * 40)
+    print("🦾 RamsEye OSINT v3.0 — FINAL (LLAMA 4 SCOUT + FLASK)")
+    print("=" * 50)
     while True:
         try:
             bot.polling(none_stop=True, interval=0, timeout=60)
