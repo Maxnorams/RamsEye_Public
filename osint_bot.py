@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RamsEye OSINT v9.1 — SECURITY FIX
+# RamsEye OSINT v2.0 — CLEAN FINAL
 
 import telebot
 import subprocess
@@ -32,7 +32,7 @@ user_step = {}
 
 # ========== АВТОПИНГ ==========
 def self_ping():
-    url = "https://ramseye-bot.onrender.com"
+    url = "https://ramseye-bot.onrender.com"  # ЗАМЕНИ НА СВОЙ URL
     while True:
         time.sleep(300)
         try:
@@ -72,7 +72,6 @@ def save_search(user_id, username, query_type, query):
 
 # ========== БЕЗОПАСНЫЙ ВЫЗОВ КОМАНД ==========
 def run_cmd_safe(cmd_args, timeout=180):
-    """Безопасный вызов subprocess (без shell=True)"""
     try:
         result = subprocess.run(cmd_args, capture_output=True, text=True, timeout=timeout)
         return result.stdout if result.returncode == 0 else result.stderr
@@ -108,7 +107,7 @@ def send_long_message(chat_id, text, title):
         except:
             bot.send_message(chat_id, f"✅ {title}:\n\n{text[:4000]}")
 
-# ========== ВАЛИДАЦИЯ ВХОДНЫХ ДАННЫХ ==========
+# ========== ВАЛИДАЦИЯ ==========
 def validate_nick(nick):
     return re.match(r'^[a-zA-Z0-9_]{3,32}$', nick) is not None
 
@@ -279,21 +278,93 @@ def main_menu():
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.send_message(message.chat.id,
-        "🛰 <b>RamsEye OSINT v9.1</b>\n\n"
+        "🛰 <b>RamsEye OSINT v2.0</b>\n\n"
         "🔍 <b>OSINT Search</b> — все инструменты в подменю\n"
         "🧠 <b>Нейросеть</b> — Llama 3.3 70B\n"
         "📊 <b>История</b> — последние поиски\n"
         "ℹ️ <b>Помощь</b> — справка\n\n"
         "👇 Выбери действие",
         parse_mode='HTML', reply_markup=main_menu())
-    logging.info(f"Юзер {message.from_user.id} запустил ботаe(message.chat.id, "📭 История пуста")
+    logging.info(f"Юзер {message.from_user.id} запустил бота")
+
+# ========== ОБРАБОТЧИКИ ==========
+def clear_step(user_id):
+    if user_id in user_step:
+        del user_step[user_id]
+
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def handle_text(message):
+    t = message.text
+    uid = message.from_user.id
+    uname = message.from_user.username or "unknown"
+
+    if uid in user_step:
+        expected = user_step[uid]
+        clear_step(uid)
+        
+        if expected == "maigret":
+            if validate_nick(t):
+                threading.Thread(target=run_cmd_background, args=(message.chat.id, ["maigret", "--txt", t, "--timeout", "30"], "Maigret", uid, uname, "nick", t)).start()
+            else:
+                bot.send_message(message.chat.id, "❌ Некорректный ник (3-32 символа, буквы/цифры/_)")
+        elif expected == "holehe":
+            if validate_email(t):
+                threading.Thread(target=run_cmd_background, args=(message.chat.id, ["holehe", t, "--only-used"], "Holehe", uid, uname, "email", t)).start()
+            else:
+                bot.send_message(message.chat.id, "❌ Некорректный email")
+        elif expected == "phone":
+            if validate_phone(t):
+                bot.send_message(message.chat.id, analyze_phone(t), parse_mode='HTML')
+            else:
+                bot.send_message(message.chat.id, "❌ Некорректный номер (+7/8, 10-11 цифр)")
+        elif expected == "ip":
+            if validate_ip(t):
+                bot.send_message(message.chat.id, get_ip_info(t), parse_mode='HTML')
+            else:
+                bot.send_message(message.chat.id, "❌ Некорректный IP")
+        elif expected == "darknet":
+            bot.send_message(message.chat.id, darknet_search(t), parse_mode='HTML')
+        elif expected == "dorks":
+            bot.send_message(message.chat.id, generate_dorks(t), parse_mode='HTML', disable_web_page_preview=True)
+        elif expected == "whatsapp":
+            if validate_phone(t):
+                bot.send_message(message.chat.id, whatsapp_check(t), parse_mode='HTML')
+            else:
+                bot.send_message(message.chat.id, "❌ Некорректный номер (+7/8, 10-11 цифр)")
+        elif expected == "whois":
+            if validate_domain(t):
+                bot.send_message(message.chat.id, whois_lookup(t), parse_mode='HTML')
+            else:
+                bot.send_message(message.chat.id, "❌ Некорректный домен (example.com)")
+        elif expected == "groq":
+            process_groq_question(message)
+        return
+
+    if t == "🔍 OSINT Search":
+        bot.send_message(message.chat.id, "🔍 <b>Выбери инструмент:</b>", parse_mode='HTML', reply_markup=tools_menu())
+    elif t == "🧠 Нейросеть":
+        bot.send_message(message.chat.id, "🧠 Задай вопрос (или /cancel):")
+        user_step[uid] = "groq"
+    elif t == "📊 История":
+        conn = sqlite3.connect('searches.db')
+        c = conn.cursor()
+        c.execute("SELECT query_type, query, timestamp FROM searches WHERE user_id = ? ORDER BY id DESC LIMIT 10", (uid,))
+        rows = c.fetchall()
+        conn.close()
+        if rows:
+            hist = "<b>📜 Последние 10 поисков:</b>\n\n"
+            for row in rows:
+                hist += f"🔹 <b>{row[0]}</b>: {row[1][:30]}\n   ⏰ {row[2]}\n\n"
+            bot.send_message(message.chat.id, hist, parse_mode='HTML')
+        else:
+            bot.send_message(message.chat.id, "📭 История пуста")
     elif t == "ℹ️ Помощь":
         bot.send_message(message.chat.id,
-            "<b>📖 RamsEye OSINT Bot v9.1</b>\n\n"
+            "<b>📖 RamsEye OSINT Bot v2.0</b>\n\n"
             "🔍 OSINT Search — ник, почта, телефон, IP, даркнет, дорки, WhatsApp, WHOIS\n"
             "🧠 Нейросеть — Llama 3.3 70B (Groq)\n\n"
             "Все данные хранятся локально.\n"
-            "🔒 Добавлена валидация ввода, безопасный вызов команд",
+            "🔒 Валидация ввода, безопасный вызов команд",
             parse_mode='HTML')
     elif t == "/cancel":
         if uid in user_step:
@@ -306,230 +377,7 @@ def start(message):
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    print("🚀 RamsEye OSINT v9.1 — FINAL")
-    print("=" * 40)
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=60)
-        except Exception as e:
-            logging.error(f"Ошибка: {e}")
-            time.sleep(5)    except subprocess.TimeoutExpired:
-        return "⏰ Таймаут 180 секунд"
-    except Exception as e:
-        logging.error(f"CMD Error: {e}")
-        return f"⚠️ Ошибка: {str(e)}"
-
-def run_cmd_background(chat_id, cmd, title, user_id, username, query_type, query):
-    with task_semaphore:
-        try:
-            bot.send_message(chat_id, f"🔍 Поиск по {title}... (очередь свободна)")
-            result = run_cmd(cmd)
-            save_search(user_id, username, query_type, query)
-            send_long_message(chat_id, result, title)
-        except Exception as e:
-            logging.error(f"Background error: {e}")
-            bot.send_message(chat_id, f"❌ Ошибка: {str(e)}")
-
-def send_long_message(chat_id, text, title):
-    if len(text) > 4000:
-        fname = f"{title}_{int(time.time())}.txt"
-        with open(fname, "w", encoding="utf-8") as f:
-            f.write(text)
-        with open(fname, "rb") as f:
-            bot.send_document(chat_id, f, caption=f"📊 Отчёт: {title}")
-        os.remove(fname)
-    else:
-        try:
-            safe_text = html.escape(text)
-            bot.send_message(chat_id, f"✅ <b>{title}</b>:\n<pre>{safe_text}</pre>", parse_mode='HTML')
-        except:
-            bot.send_message(chat_id, f"✅ {title}:\n\n{text[:4000]}")
-
-# ========== ОСНОВНЫЕ МОДУЛИ ==========
-def analyze_phone(phone):
-    phone_clean = re.sub(r'[^0-9+]', '', phone)
-    if phone_clean.startswith('8'):
-        phone_clean = '+7' + phone_clean[1:]
-    if not phone_clean.startswith('+'):
-        phone_clean = '+' + phone_clean
-    result = f"📱 <b>Анализ номера {phone_clean}</b>\n\n"
-    try:
-        num = phonenumbers.parse(phone_clean, None)
-        country = geocoder.description_for_number(num, "ru")
-        oper = carrier.name_for_number(num, "en")
-        result += f"🌍 Страна: {country}\n📡 Оператор: {oper if oper else 'Не определён'}\n"
-    except:
-        result += "⚠️ Не удалось определить оператора\n"
-    result += f"\n🔍 <b>Поиск по номеру:</b>\n• <a href='https://www.google.com/search?q={phone_clean}'>Google</a>\n• <a href='https://vk.com/search?c[phone]={phone_clean}'>VK</a>"
-    return result
-
-def whatsapp_check(phone):
-    phone_clean = re.sub(r'[^0-9]', '', phone)
-    if phone_clean.startswith('8'):
-        phone_clean = '7' + phone_clean[1:]
-    elif not phone_clean.startswith('7'):
-        phone_clean = '7' + phone_clean
-    try:
-        resp = requests.get(f"https://api.whatsapp.com/send/?phone={phone_clean}", timeout=10)
-        if "This phone number is not on WhatsApp" in resp.text:
-            return "❌ Номер НЕ зарегистрирован в WhatsApp"
-        return f"✅ Номер активен в WhatsApp\n🔗 https://wa.me/{phone_clean}"
-    except:
-        return "⚠️ Не удалось проверить"
-
-def darknet_search(query):
-    results = []
-    try:
-        url = f"https://ahmia.fi/search/?q={quote(query)}"
-        resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        for link in soup.find_all('a', href=True):
-            if '.onion' in link['href']:
-                results.append(link['href'])
-                if len(results) >= 5: break
-    except:
-        pass
-    if results:
-        return "💀 <b>Найдено в даркнете:</b>\n" + "\n".join(results)
-    return "🌑 Не найдено в публичных индексах"
-
-def generate_dorks(query):
-    q = quote(query)
-    dorks = [
-        f'"{query}" filetype:pdf', f'"{query}" filetype:xls',
-        f'site:vk.com "{query}"', f'site:ok.ru "{query}"',
-        f'site:t.me "{query}"', f'site:github.com "{query}"'
-    ]
-    result = f"🔍 <b>Google Dorks для: {html.escape(query)}</b>\n\n"
-    for d in dorks[:8]:
-        result += f"• <a href='https://www.google.com/search?q={quote(d)}'>{html.escape(d)}</a>\n"
-    return result
-
-def get_ip_info(ip):
-    try:
-        resp = requests.get(f"http://ip-api.com/json/{ip}", timeout=10)
-        data = resp.json()
-        if data.get('status') == 'success':
-            return f"🌐 <b>IP: {ip}</b>\n📍 {data.get('country')}\n🏙 {data.get('city')}\n📡 {data.get('isp')}"
-        return f"❌ Не удалось получить информацию для IP {ip}"
-    except:
-        return f"⚠️ Ошибка при запросе IP {ip}"
-
-# ========== GROQ NEURO ==========
-def ask_groq(question):
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": [{"role": "user", "content": question}],
-        "temperature": 0.7,
-        "max_tokens": 1000
-    }
-    try:
-        response = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            return f"❌ Ошибка API: {response.status_code}\n{response.text[:200]}"
-    except Exception as e:
-        return f"❌ Ошибка подключения: {str(e)}"
-
-def process_groq_question(message):
-    if message.text == "/cancel":
-        bot.send_message(message.chat.id, "Отменено.")
-        return
-    bot.send_chat_action(message.chat.id, 'typing')
-    bot.send_message(message.chat.id, "🤔 Думаю... (Llama 3.3 70B)")
-    answer = ask_groq(message.text)
-    if len(answer) > 4000:
-        fname = f"groq_{int(time.time())}.txt"
-        with open(fname, "w") as f: f.write(answer)
-        with open(fname, "rb") as f: bot.send_document(message.chat.id, f, caption="🧠 Ответ Groq")
-        os.remove(fname)
-    else:
-        bot.send_message(message.chat.id, f"🧠 <b>Llama 3.3 (Groq):</b>\n\n{answer}", parse_mode='HTML')
-
-# ========== МЕНЮ ==========
-def main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("👤 Ник (Maigret)", "📧 Почта (Holehe)")
-    markup.add("📱 Телефон", "🌐 IP-пробив")
-    markup.add("💀 Darknet", "🕸 Google Dorks")
-    markup.add("📱 WhatsApp", "🧠 Llama 3.3")
-    markup.add("📊 История", "ℹ️ Помощь")
-    return markup
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.send_message(message.chat.id,
-        "🛰 <b>OSINT v8.2 — Llama 3.3 Integrated</b>\n\n"
-        "🔹 <b>Ник</b> (Maigret)\n🔹 <b>Почта</b> (Holehe)\n🔹 <b>Телефон / IP / WhatsApp</b>\n"
-        "🔹 <b>Darknet / Dorks</b>\n🔹 <b>Llama 3.3 70B</b> (Groq)\n\nВыбери действие 👇",
-        parse_mode='HTML', reply_markup=main_menu())
-    logging.info(f"Юзер {message.from_user.id} запустил бота")
-
-# ========== ОБРАБОТЧИКИ ==========
-def clear_step(user_id):
-    if user_id in user_step: del user_step[user_id]
-
-@bot.message_handler(func=lambda message: True, content_types=['text'])
-def handle_text(message):
-    t = message.text
-    uid = message.from_user.id
-    uname = message.from_user.username or "unknown"
-    
-    # Ожидание ввода
-    if uid in user_step:
-        expected = user_step[uid]
-        menu_commands = ["👤 Ник (Maigret)", "📧 Почта (Holehe)", "📱 Телефон", "🌐 IP-пробив",
-                         "💀 Darknet", "🕸 Google Dorks", "📱 WhatsApp", "🧠 Llama 3.3", "📊 История", "ℹ️ Помощь"]
-        if t in menu_commands:
-            clear_step(uid)
-        else:
-            clear_step(uid)
-            if expected == "maigret":
-                threading.Thread(target=run_cmd_background, args=(message.chat.id, f"maigret --txt {t} --timeout 30", "Maigret", uid, uname, "nick", t)).start()
-            elif expected == "holehe":
-                threading.Thread(target=run_cmd_background, args=(message.chat.id, f"holehe {t} --only-used", "Holehe", uid, uname, "email", t)).start()
-            elif expected == "phone": bot.send_message(message.chat.id, analyze_phone(t), parse_mode='HTML')
-            elif expected == "ip": bot.send_message(message.chat.id, get_ip_info(t), parse_mode='HTML')
-            elif expected == "darknet": bot.send_message(message.chat.id, darknet_search(t), parse_mode='HTML')
-            elif expected == "dorks": bot.send_message(message.chat.id, generate_dorks(t), parse_mode='HTML', disable_web_page_preview=True)
-            elif expected == "whatsapp": bot.send_message(message.chat.id, whatsapp_check(t), parse_mode='HTML')
-            elif expected == "groq": process_groq_question(message)
-            return
-
-    # Команды меню
-    if t == "👤 Ник (Maigret)": bot.send_message(message.chat.id, "🔎 Введи никнейм:"); user_step[uid] = "maigret"
-    elif t == "📧 Почта (Holehe)": bot.send_message(message.chat.id, "📧 Введи email:"); user_step[uid] = "holehe"
-    elif t == "📱 Телефон": bot.send_message(message.chat.id, "📱 Введи номер (+7...):"); user_step[uid] = "phone"
-    elif t == "🌐 IP-пробив": bot.send_message(message.chat.id, "🌐 Введи IP:"); user_step[uid] = "ip"
-    elif t == "💀 Darknet": bot.send_message(message.chat.id, "💀 Введи ник/email:"); user_step[uid] = "darknet"
-    elif t == "🕸 Google Dorks": bot.send_message(message.chat.id, "🔎 Введи имя/ник:"); user_step[uid] = "dorks"
-    elif t == "📱 WhatsApp": bot.send_message(message.chat.id, "📱 Введи номер (+7...):"); user_step[uid] = "whatsapp"
-    elif t == "🧠 Llama 3.3": bot.send_message(message.chat.id, "🧠 Задай вопрос (или /cancel):"); user_step[uid] = "groq"
-    elif t == "📊 История":
-        conn = sqlite3.connect('searches.db')
-        c = conn.cursor()
-        c.execute("SELECT query_type, query, timestamp FROM searches WHERE user_id = ? ORDER BY id DESC LIMIT 10", (uid,))
-        rows = c.fetchall()
-        conn.close()
-        if rows:
-            hist = "<b>📜 Последние 10 поисков:</b>\n\n"
-            for row in rows: hist += f"🔹 <b>{row[0]}</b>: {row[1][:30]}\n   ⏰ {row[2]}\n\n"
-            bot.send_message(message.chat.id, hist, parse_mode='HTML')
-        else: bot.send_message(message.chat.id, "📭 История пуста")
-    elif t == "ℹ️ Помощь":
-        bot.send_message(message.chat.id, "Выбери пункт меню.\nДля админа: /admin\nДанные локально.", parse_mode='HTML')
-    elif t == "/cancel":
-        if uid in user_step: clear_step(uid); bot.send_message(message.chat.id, "Ожидание ввода отменено.")
-        else: bot.send_message(message.chat.id, "Нет активного ожидания.")
-    else:
-        bot.send_message(message.chat.id, "Используй кнопки меню 👇", reply_markup=main_menu())
-
-# ========== ЗАПУСК ==========
-if __name__ == '__main__':
-    print("🚀 OSINT BOT v8.2 — Llama 3.3 READY")
-    print(f"👑 Админ ID: {ADMIN_ID}")
+    print("🚀 RamsEye OSINT v2.0 — CLEAN FINAL")
     print("=" * 40)
     while True:
         try:
