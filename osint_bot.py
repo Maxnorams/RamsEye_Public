@@ -24,7 +24,8 @@ ADMIN_ID = 8773077211
 bot = telebot.TeleBot(TOKEN)
 
 # GROQ API (исправлено)
-GROQ_API_KEY = os.environ.get('GROQ_API_KEY')GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile" # <--- НОВАЯ РАБОЧАЯ МОДЕЛЬ
 
 # Ограничение потоков
