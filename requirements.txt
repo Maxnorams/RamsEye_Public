@@ -1,6 +1,9 @@
-pyTelegramBotAPI
-requests
-beautifulsoup4
-holehe
-maigret
-flask
+# RamsEye OSINT v6.0 — PRODUCTION DEPENDENCIES
+
+pyTelegramBotAPI==4.18.0
+flask==3.0.3
+requests==2.32.3
+dnspython==2.6.1
+python-whois==0.9.5
+Pillow==10.4.0
+beautifulsoup4==4.12.3
