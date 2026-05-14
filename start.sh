@@ -1,2 +1,5 @@
 #!/bin/bash
-python3 osint_bot.py
+echo "🚀 Устанавливаю зависимости OSINT..."
+pip install maigret holehe
+echo "🚀 Запускаю RamsEye бота..."
+python3 osint_bot.py#
