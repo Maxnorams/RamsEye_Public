@@ -1,8 +1,6 @@
 pyTelegramBotAPI
-phonenumbers
 requests
 beautifulsoup4
 holehe
 maigret
-whois
 flask
