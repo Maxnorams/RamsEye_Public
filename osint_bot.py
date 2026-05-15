@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RamsEye OSINT v6.1 — COMPLETE FIXED (Maigret import corrected)
+# RamsEye OSINT v6.2 — TIMEOUT FIXED (Maigret 160 sec)
 
 import telebot
 import os
@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 from telebot import types
 from flask import Flask
-import maigret  # <--- ИСПРАВЛЕНО
+import maigret  # Исправленный импорт
 from holehe import check_email
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
@@ -36,7 +36,7 @@ GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 bot = telebot.TeleBot(TOKEN)
 session = requests.Session()
-session.headers.update({'User-Agent': 'RamsEye-OSINT/6.1'})
+session.headers.update({'User-Agent': 'RamsEye-OSINT/6.2'})
 
 task_semaphore = threading.Semaphore(3)
 user_step = {}
@@ -50,7 +50,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def health():
-    return f"RamsEye OSINT v6.1 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 200
+    return f"RamsEye OSINT v6.2 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 200
 
 threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
 
@@ -120,10 +120,10 @@ def send_result(chat_id, text, title):
         except:
             bot.send_message(chat_id, text[:4000])
 
-# ========== MAIGRET (ИСПРАВЛЕНО) ==========
+# ========== MAIGRET (ТАЙМАУТ 160 СЕКУНД) ==========
 def maigret_lookup(username):
     try:
-        result = maigret.search(username, timeout=30)
+        result = maigret.search(username, timeout=160)  # <--- 160 секунд
         if not result:
             return "❌ Ничего не найдено"
         lines = [f"👤 <b>Результаты для {username}</b>\n"]
@@ -136,7 +136,7 @@ def maigret_lookup(username):
     except Exception as e:
         return f"❌ Ошибка Maigret: {e}"
 
-# ========== HOLEHE (БИБЛИОТЕКА) ==========
+# ========== HOLEHE ==========
 async def holehe_async(email):
     try:
         return await check_email(email)
@@ -332,7 +332,7 @@ def ask_groq(question, context=""):
 def cluster_data(data_text):
     return ask_groq(f"Проанализируй данные OSINT-расследования. Найди и структурируй: идентификаторы, связи между ними, временную шкалу, выводы, рекомендации. Данные:\n{data_text}")
 
-# ========== DOSSIER (ПАРАЛЛЕЛЬНЫЙ) ==========
+# ========== DOSSIER ==========
 def run_dossier(target, chat_id):
     with task_semaphore:
         bot.send_message(chat_id, f"📂 Сбор досье для {html.escape(target)}...")
@@ -353,7 +353,7 @@ def run_dossier(target, chat_id):
             output = {}
             for name, f in results.items():
                 try:
-                    output[name] = f.result(timeout=150)
+                    output[name] = f.result(timeout=200)
                 except Exception as e:
                     output[name] = f"❌ Ошибка: {e}"
 
@@ -393,7 +393,7 @@ def cmd_start(message):
         bot.send_message(message.chat.id, "❌ Доступ запрещён.")
         return
     bot.send_message(message.chat.id,
-        "🦾 <b>RAMSEYE OSINT v6.1</b>\n\n"
+        "🦾 <b>RAMSEYE OSINT v6.2</b>\n\n"
         "🔍 OSINT SEARCH — все инструменты\n"
         "🧠 RAMSEYE AI — Llama 4 Scout\n"
         "📂 DOSSIER — параллельный сбор + AI\n"
@@ -521,8 +521,8 @@ def on_text(message):
         bot.send_message(message.chat.id, "📂 Введи цель (ник, email, IP, домен):")
     elif text == "ℹ️ ПОМОЩЬ":
         bot.send_message(message.chat.id,
-            "<b>📖 RamsEye OSINT v6.1</b>\n\n"
-            "👤 Maigret — поиск ника по 500+ соцсетям\n"
+            "<b>📖 RamsEye OSINT v6.2</b>\n\n"
+            "👤 Maigret — поиск ника по 500+ соцсетям (160 сек)\n"
             "📧 Holehe — проверка email по сервисам\n"
             "🌐 IP — геолокация, ISP, VPN/Proxy/Tor\n"
             "🔭 Shodan — порты, CVE, баннеры\n"
@@ -545,7 +545,7 @@ def on_text(message):
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    print("🦾 RamsEye OSINT v6.1 — COMPLETE FIXED")
+    print("🦾 RamsEye OSINT v6.2 — TIMEOUT 160 sec")
     if not ADMIN_ID or not TOKEN:
         print("❌ FATAL: задайте ADMIN_ID и TELEGRAM_TOKEN")
         exit(1)
