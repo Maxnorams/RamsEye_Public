@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RamsEye OSINT v6.1 — COMPLETE (Library Mode, Full Prompt)
+# RamsEye OSINT v6.1 — COMPLETE FIXED (Maigret import corrected)
 
 import telebot
 import os
@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 from telebot import types
 from flask import Flask
-from maigret import Maigret
+import maigret  # <--- ИСПРАВЛЕНО
 from holehe import check_email
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
@@ -120,11 +120,10 @@ def send_result(chat_id, text, title):
         except:
             bot.send_message(chat_id, text[:4000])
 
-# ========== MAIGRET (БИБЛИОТЕКА) ==========
+# ========== MAIGRET (ИСПРАВЛЕНО) ==========
 def maigret_lookup(username):
     try:
-        m = Maigret()
-        result = m.search(username, timeout=30)
+        result = maigret.search(username, timeout=30)
         if not result:
             return "❌ Ничего не найдено"
         lines = [f"👤 <b>Результаты для {username}</b>\n"]
@@ -299,7 +298,7 @@ def extract_exif(file_path):
     except Exception as e:
         return f"⚠️ EXIF ошибка: {e}"
 
-# ========== GROQ AI С ПРОМТОМ ==========
+# ========== GROQ AI ==========
 SYSTEM_PROMPT = """Ты — RamsEye AI, профессиональный OSINT-ассистент.
 Твои задачи:
 - Анализ данных из открытых источников
@@ -333,29 +332,6 @@ def ask_groq(question, context=""):
 def cluster_data(data_text):
     return ask_groq(f"Проанализируй данные OSINT-расследования. Найди и структурируй: идентификаторы, связи между ними, временную шкалу, выводы, рекомендации. Данные:\n{data_text}")
 
-# ========== INLINE-МЕНЮ ==========
-def tools_menu():
-    m = types.InlineKeyboardMarkup(row_width=2)
-    m.add(
-        types.InlineKeyboardButton("👤 MAIGRET", callback_data="maigret"),
-        types.InlineKeyboardButton("📧 HOLEHE", callback_data="holehe"),
-        types.InlineKeyboardButton("🌐 IP-ПРОБИВ", callback_data="ip"),
-        types.InlineKeyboardButton("🔭 SHODAN", callback_data="shodan"),
-        types.InlineKeyboardButton("🔍 DNS", callback_data="dns"),
-        types.InlineKeyboardButton("🌍 WHOIS", callback_data="whois"),
-        types.InlineKeyboardButton("🕸 DORKS", callback_data="dorks"),
-        types.InlineKeyboardButton("🧠 CLUSTER", callback_data="cluster"),
-        types.InlineKeyboardButton("📷 EXIF-ФОТО", callback_data="exif"),
-        types.InlineKeyboardButton("❌ ЗАКРЫТЬ", callback_data="close"),
-    )
-    return m
-
-def main_menu():
-    m = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    m.add("🔍 OSINT SEARCH", "🧠 RAMSEYE AI")
-    m.add("📂 DOSSIER", "ℹ️ ПОМОЩЬ")
-    return m
-
 # ========== DOSSIER (ПАРАЛЛЕЛЬНЫЙ) ==========
 def run_dossier(target, chat_id):
     with task_semaphore:
@@ -386,6 +362,29 @@ def run_dossier(target, chat_id):
 
         report = f"Цель: {target}\nДата: {datetime.now()}\n\n" + "\n\n".join([f"[{name}]\n{text}" for name, text in output.items()]) + f"\n\n[AI АНАЛИЗ]\n{ai_summary}"
         send_result(chat_id, report, f"Досье: {target}")
+
+# ========== INLINE-МЕНЮ ==========
+def tools_menu():
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.add(
+        types.InlineKeyboardButton("👤 MAIGRET", callback_data="maigret"),
+        types.InlineKeyboardButton("📧 HOLEHE", callback_data="holehe"),
+        types.InlineKeyboardButton("🌐 IP-ПРОБИВ", callback_data="ip"),
+        types.InlineKeyboardButton("🔭 SHODAN", callback_data="shodan"),
+        types.InlineKeyboardButton("🔍 DNS", callback_data="dns"),
+        types.InlineKeyboardButton("🌍 WHOIS", callback_data="whois"),
+        types.InlineKeyboardButton("🕸 DORKS", callback_data="dorks"),
+        types.InlineKeyboardButton("🧠 CLUSTER", callback_data="cluster"),
+        types.InlineKeyboardButton("📷 EXIF-ФОТО", callback_data="exif"),
+        types.InlineKeyboardButton("❌ ЗАКРЫТЬ", callback_data="close"),
+    )
+    return m
+
+def main_menu():
+    m = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    m.add("🔍 OSINT SEARCH", "🧠 RAMSEYE AI")
+    m.add("📂 DOSSIER", "ℹ️ ПОМОЩЬ")
+    return m
 
 # ========== ОБРАБОТЧИКИ TELEGRAM ==========
 @bot.message_handler(commands=['start', 'help'])
@@ -419,7 +418,7 @@ def on_callback(call):
     }
     clear_step(call.from_user.id)
     set_step(call.from_user.id, call.data)
-    bot.send_message(call.message.chat.id, prompts.get(call.data, "Введи данные:"))
+    bot.send_message(call.message.chat.id, prompts.get(call.data, "Введи dati:"))
 
 @bot.message_handler(content_types=['photo', 'document'])
 def on_media(message):
@@ -546,7 +545,7 @@ def on_text(message):
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    print("🦾 RamsEye OSINT v6.1 — COMPLETE")
+    print("🦾 RamsEye OSINT v6.1 — COMPLETE FIXED")
     if not ADMIN_ID or not TOKEN:
         print("❌ FATAL: задайте ADMIN_ID и TELEGRAM_TOKEN")
         exit(1)
