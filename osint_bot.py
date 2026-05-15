@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RamsEye OSINT v6.5 — FINAL (All fixes, groq handler added)
+# RamsEye OSINT v6.6 — FINAL (subprocess maigret, fixed callbacks)
 
 import telebot
 import os
@@ -12,12 +12,12 @@ import requests
 import dns.resolver
 import asyncio
 import whois
+import subprocess
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 from telebot import types
 from flask import Flask
-import maigret
 from holehe import core
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
@@ -34,7 +34,7 @@ GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 bot = telebot.TeleBot(TOKEN)
 session = requests.Session()
-session.headers.update({'User-Agent': 'RamsEye-OSINT/6.5'})
+session.headers.update({'User-Agent': 'RamsEye-OSINT/6.6'})
 
 task_semaphore = threading.Semaphore(3)
 user_step = {}
@@ -48,7 +48,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def health():
-    return f"RamsEye OSINT v6.5 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 200
+    return f"RamsEye OSINT v6.6 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 200
 
 threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
 
@@ -118,21 +118,29 @@ def send_result(chat_id, text, title):
         except:
             bot.send_message(chat_id, text[:4000])
 
-# ========== MAIGRET (160 секунд) ==========
+# ========== MAIGRET (subprocess) ==========
 def maigret_lookup(username):
     try:
-        from maigret import search
-        result = search(username, timeout=160)
-        if not result:
-            return "❌ Ничего не найдено"
-        lines = [f"👤 <b>Результаты для {username}</b>\n"]
-        for site, data in result.items():
-            if data.get('status', {}).get('exists'):
-                url = data.get('url', '')
-                if url:
-                    lines.append(f"• {site}: <a href='{url}'>{url}</a>")
-        return '\n'.join(lines[:30])
+        result = subprocess.run(
+            ["maigret", username, "--no-color", "--timeout", "30"],
+            capture_output=True,
+            text=True,
+            timeout=160
+        )
+        output = result.stdout or result.stderr or "Нет вывода"
+        lines = [f"👤 <b>Maigret: {html.escape(username)}</b>\n"]
+        for line in output.splitlines():
+            if "[+]" in line or "Found" in line.lower():
+                lines.append(f"✅ {html.escape(line.strip())}")
+        if len(lines) == 1:
+            lines.append("❌ Аккаунты не найдены")
+        return '\n'.join(lines[:40])
+    except subprocess.TimeoutExpired:
+        return "⏰ Maigret: таймаут 160 сек"
+    except FileNotFoundError:
+        return "❌ Maigret не установлен. Выполни: pip install maigret"
     except Exception as e:
+        log.error(f"Maigret error: {e}")
         return f"❌ Ошибка Maigret: {e}"
 
 def maigret_thread(chat_id, username):
@@ -368,6 +376,7 @@ SYSTEM_PROMPT = """Ты — RamsEye AI, персональный OSINT-асси�
   🖥 Инфраструктура | 🔓 Уязвимости | 📡 Сервисы | 🗺 Связи
 
 Язык ответов: русский, технические термины на английском где принято."""
+
 def ask_groq(question, context=""):
     if not GROQ_KEY:
         return "⚠️ GROQ_API_KEY не задан"
@@ -459,7 +468,7 @@ def cmd_start(message):
         bot.send_message(message.chat.id, "❌ Доступ запрещён.")
         return
     bot.send_message(message.chat.id,
-        "🦾 <b>RAMSEYE OSINT v6.5</b>\n\n"
+        "🦾 <b>RAMSEYE OSINT v6.6</b>\n\n"
         "🔍 OSINT SEARCH — все инструменты (в потоках)\n"
         "🧠 RAMSEYE AI — Llama 4 Scout\n"
         "📂 DOSSIER — параллельный сбор + AI\n"
@@ -477,13 +486,19 @@ def on_callback(call):
         bot.answer_callback_query(call.id, "Закрыто")
         return
     prompts = {
-        "maigret": "👤 Введи ник:", "holehe": "📧 Введи email:", "ip": "🌐 Введи IP:",
-        "shodan": "🔭 Введи IP для Shodan:", "dns": "🔍 Введи домен:", "whois": "🌍 Введи домен:",
-        "dorks": "🕸 Введи запрос:", "cluster": "🧠 Вставь данные для анализа:",
+        "maigret": "👤 Введи ник:",
+        "holehe": "📧 Введи email:",
+        "ip": "🌐 Введи IP:",
+        "shodan": "🔭 Введи IP для Shodan:",
+        "dns": "🔍 Введи домен:",
+        "whois": "🌍 Введи домен:",
+        "dorks": "🕸 Введи запрос:",
+        "cluster": "🧠 Вставь данные для анализа:",
         "exif": "📷 Отправь фотографию (файлом)"
     }
     clear_step(call.from_user.id)
     set_step(call.from_user.id, call.data)
+    bot.answer_callback_query(call.id)  # убирает часики
     bot.send_message(call.message.chat.id, prompts.get(call.data, "Введи данные:"))
 
 @bot.message_handler(content_types=['photo', 'document'])
@@ -591,7 +606,7 @@ def on_text(message):
         bot.send_message(message.chat.id, "📂 Введи цель (ник, email, IP, домен):")
     elif text == "ℹ️ ПОМОЩЬ":
         bot.send_message(message.chat.id,
-            "<b>📖 RamsEye OSINT v6.5</b>\n\n"
+            "<b>📖 RamsEye OSINT v6.6</b>\n\n"
             "👤 Maigret — поиск ника (160 сек, в потоке)\n"
             "📧 Holehe — проверка email\n"
             "🌐 IP — геолокация, ISP, VPN/Proxy/Tor\n"
@@ -615,7 +630,7 @@ def on_text(message):
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    print("🦾 RamsEye OSINT v6.5 — FINAL (all threads, groq handler added)")
+    print("🦾 RamsEye OSINT v6.6 — FINAL (subprocess maigret, fixed callbacks)")
     if not ADMIN_ID or not TOKEN:
         print("❌ FATAL: задайте ADMIN_ID и TELEGRAM_TOKEN")
         exit(1)
