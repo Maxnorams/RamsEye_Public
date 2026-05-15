@@ -3,7 +3,7 @@ flask
 requests
 dnspython
 python-whois
-maigret
+maigret==0.5.1
 holehe
 Pillow
 beautifulsoup4
