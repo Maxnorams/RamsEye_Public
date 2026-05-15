@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# RamsEye OSINT v6.2 — TIMEOUT FIXED (Maigret 160 sec)
+# RamsEye OSINT v6.5 — FINAL (All fixes, groq handler added)
 
 import telebot
 import os
@@ -9,18 +9,16 @@ import time
 import logging
 import threading
 import requests
-import json
 import dns.resolver
 import asyncio
-import socket
 import whois
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 from telebot import types
 from flask import Flask
-import maigret  # Исправленный импорт
-from holehe import check_email
+import maigret
+from holehe import core
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 
@@ -36,7 +34,7 @@ GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 bot = telebot.TeleBot(TOKEN)
 session = requests.Session()
-session.headers.update({'User-Agent': 'RamsEye-OSINT/6.2'})
+session.headers.update({'User-Agent': 'RamsEye-OSINT/6.5'})
 
 task_semaphore = threading.Semaphore(3)
 user_step = {}
@@ -50,7 +48,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def health():
-    return f"RamsEye OSINT v6.2 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 200
+    return f"RamsEye OSINT v6.5 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 200
 
 threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
 
@@ -120,10 +118,10 @@ def send_result(chat_id, text, title):
         except:
             bot.send_message(chat_id, text[:4000])
 
-# ========== MAIGRET (ТАЙМАУТ 160 СЕКУНД) ==========
+# ========== MAIGRET (160 секунд) ==========
 def maigret_lookup(username):
     try:
-        result = maigret.search(username, timeout=160)  # <--- 160 секунд
+        result = maigret.search(username, timeout=160)
         if not result:
             return "❌ Ничего не найдено"
         lines = [f"👤 <b>Результаты для {username}</b>\n"]
@@ -136,18 +134,22 @@ def maigret_lookup(username):
     except Exception as e:
         return f"❌ Ошибка Maigret: {e}"
 
+def maigret_thread(chat_id, username):
+    send_result(chat_id, maigret_lookup(username), "MAIGRET")
+
 # ========== HOLEHE ==========
-async def holehe_async(email):
+async def holehe_lookup_async(email):
     try:
-        return await check_email(email)
-    except:
+        return await core.check_email(email)
+    except Exception as e:
+        log.error(f"Holehe error: {e}")
         return {}
 
 def holehe_lookup(email):
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(holehe_async(email))
+        result = loop.run_until_complete(holehe_lookup_async(email))
         loop.close()
         found = []
         for service, data in result.items():
@@ -160,7 +162,10 @@ def holehe_lookup(email):
     except Exception as e:
         return f"❌ Ошибка Holehe: {e}"
 
-# ========== IP ИНФО ==========
+def holehe_thread(chat_id, email):
+    send_result(chat_id, holehe_lookup(email), "HOLEHE")
+
+# ========== IP ==========
 def get_ip_info(ip):
     try:
         r = session.get(f"https://ipinfo.io/{ip}/json", timeout=10)
@@ -186,7 +191,7 @@ def get_ip_info(ip):
     except Exception as e:
         return f"⚠️ Ошибка: {e}"
 
-# ========== DNS РАЗВЕДКА ==========
+# ========== DNS ==========
 def dns_recon(domain):
     lines = [f"🔍 <b>DNS-разведка: {html.escape(domain)}</b>\n"]
     record_types = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME', 'SOA']
@@ -214,6 +219,9 @@ def dns_recon(domain):
     except:
         lines.append("  ⚠️ crt.sh ошибка")
     return '\n'.join(lines)
+
+def dns_thread(chat_id, domain):
+    send_result(chat_id, dns_recon(domain), "DNS")
 
 # ========== SHODAN ==========
 def shodan_lookup(ip):
@@ -244,18 +252,21 @@ def whois_lookup(domain):
         fields = {'Регистратор': w.registrar, 'Создан': w.creation_date, 'Истекает': w.expiration_date, 'Организация': w.org, 'Страна': w.country, 'Email': w.emails, 'Серверы имён': w.name_servers}
         for label, val in fields.items():
             if val:
+                if isinstance(val, list):
+                    val = ', '.join(str(v) for v in val[:3])
                 lines.append(f"<b>{label}:</b> {html.escape(str(val)[:200])}")
         return '\n'.join(lines)
     except Exception as e:
         return f"❌ WHOIS ошибка: {e}"
 
-# ========== GOOGLE DORKS ==========
+# ========== DORKS ==========
 def generate_dorks(query):
     dorks = [
-        f'"{query}" filetype:pdf', f'"{query}" filetype:xls OR filetype:xlsx', f'"{query}" filetype:doc OR filetype:docx',
-        f'site:vk.com "{query}"', f'site:ok.ru "{query}"', f'site:t.me "{query}"', f'site:github.com "{query}"',
-        f'site:linkedin.com "{query}"', f'site:instagram.com "{query}"', f'"{query}" inurl:admin',
-        f'"{query}" intext:password', f'"{query}" site:pastebin.com'
+        f'"{query}" filetype:pdf', f'"{query}" filetype:xls OR filetype:xlsx',
+        f'"{query}" filetype:doc OR filetype:docx', f'site:vk.com "{query}"',
+        f'site:ok.ru "{query}"', f'site:t.me "{query}"', f'site:github.com "{query}"',
+        f'site:linkedin.com "{query}"', f'site:instagram.com "{query}"',
+        f'"{query}" inurl:admin', f'"{query}" intext:password', f'"{query}" site:pastebin.com'
     ]
     result = f"🕸 <b>Google Dorks: {html.escape(query)}</b>\n\n"
     for d in dorks:
@@ -299,18 +310,63 @@ def extract_exif(file_path):
         return f"⚠️ EXIF ошибка: {e}"
 
 # ========== GROQ AI ==========
-SYSTEM_PROMPT = """Ты — RamsEye AI, профессиональный OSINT-ассистент.
-Твои задачи:
-- Анализ данных из открытых источников
-- Поиск связей между никами, email, IP, доменами
-- Объяснение методов OSINT-расследований
-- Помощь в интерпретации результатов инструментов (Maigret, Shodan, DNS)
-- Составление стратегии расследования
+SYSTEM_PROMPT = """Ты — RamsEye AI, персональный OSINT-ассистент аналитика Maxnorams.
 
-Ты работаешь строго в рамках закона и этики OSINT.
-Отвечай структурированно, детально, на русском языке.
-Если запрос неоднозначен — уточни цель исследования."""
+РОЛЬ И КОНТЕКСТ:
+Ты работаешь в составе профессиональной команды кибербезопасности.
+Твой пользователь — опытный OSINT-аналитик, специализирующийся на расследованиях
+по открытым источникам: корпоративная разведка, верификация личностей,
+анализ цифрового следа, расследование мошенничества.
 
+ТВОИ КОМПЕТЕНЦИИ:
+1. Анализ и интерпретация результатов инструментов:
+   Maigret, Holehe, Shodan, Maltego, theHarvester, SpiderFoot,
+   Recon-ng, OSINT Framework, Censys, Fofa, ZoomEye
+2. Разведка по открытым источникам:
+   - Анализ никнеймов, email, телефонов, IP, доменов
+   - Поиск цифрового следа и кросс-платформенных связей
+   - Анализ метаданных документов и изображений (EXIF)
+   - Исследование инфраструктуры (DNS, WHOIS, ASN, BGP)
+   - Анализ сертификатов SSL и субдоменов
+3. Разведка по социальным сетям (SOCMINT):
+   - ВКонтакте, Telegram, Instagram, Twitter/X, LinkedIn, TikTok
+   - Анализ паттернов активности и временных зон
+   - Поиск связанных аккаунтов по аватарам, стилю, лексике
+4. Технический анализ:
+   - Интерпретация Shodan-баннеров и CVE
+   - Анализ открытых портов и сервисов
+   - Оценка инфраструктуры цели
+5. Аналитика и отчётность:
+   - Построение графов связей между идентификаторами
+   - Временны́е шкалы активности
+   - Составление структурированных досье
+   - Оценка достоверности и источников
+
+СТИЛЬ РАБОТЫ:
+- Отвечай структурированно: заголовки, списки, чёткие выводы
+- Используй профессиональную терминологию OSINT/CYBERSEC
+- Давай конкретные следующие шаги расследования
+- Указывай уровень достоверности информации (высокий/средний/низкий)
+- Предлагай альтернативные векторы поиска если основной не дал результатов
+- При анализе данных всегда выделяй: факты, предположения, рекомендации
+
+ЭТИКА И ОГРАНИЧЕНИЯ:
+- Работаешь исключительно с публично доступными данными
+- Не помогаешь с действиями, нарушающими законодательство
+- Не участвуешь в преследовании, сталкинге или доксинге частных лиц
+- Все расследования предполагают законный профессиональный контекст
+
+ФОРМАТ ОТВЕТОВ:
+Для стратегии расследования:
+  🎯 Цель | 🔍 Векторы поиска | 📊 Приоритеты | ⚠️ Риски
+
+Для анализа данных:
+  ✅ Подтверждённые факты | 🔶 Предположения | ❓ Требует проверки
+
+Для технического анализа:
+  🖥 Инфраструктура | 🔓 Уязвимости | 📡 Сервисы | 🗺 Связи
+
+Язык ответов: русский, технические термины на английском где принято."""
 def ask_groq(question, context=""):
     if not GROQ_KEY:
         return "⚠️ GROQ_API_KEY не задан"
@@ -328,9 +384,15 @@ def ask_groq(question, context=""):
     except Exception as e:
         return f"❌ Groq ошибка: {e}"
 
-# ========== КЛАСТЕРИЗАЦИЯ ==========
+def groq_thread(chat_id, question):
+    send_result(chat_id, ask_groq(question), "RAMSEYE AI")
+
+# ========== CLUSTER ==========
 def cluster_data(data_text):
     return ask_groq(f"Проанализируй данные OSINT-расследования. Найди и структурируй: идентификаторы, связи между ними, временную шкалу, выводы, рекомендации. Данные:\n{data_text}")
+
+def cluster_thread(chat_id, data_text):
+    send_result(chat_id, cluster_data(data_text), "CLUSTER")
 
 # ========== DOSSIER ==========
 def run_dossier(target, chat_id):
@@ -363,7 +425,10 @@ def run_dossier(target, chat_id):
         report = f"Цель: {target}\nДата: {datetime.now()}\n\n" + "\n\n".join([f"[{name}]\n{text}" for name, text in output.items()]) + f"\n\n[AI АНАЛИЗ]\n{ai_summary}"
         send_result(chat_id, report, f"Досье: {target}")
 
-# ========== INLINE-МЕНЮ ==========
+def dossier_thread(chat_id, target):
+    run_dossier(target, chat_id)
+
+# ========== МЕНЮ ==========
 def tools_menu():
     m = types.InlineKeyboardMarkup(row_width=2)
     m.add(
@@ -386,15 +451,15 @@ def main_menu():
     m.add("📂 DOSSIER", "ℹ️ ПОМОЩЬ")
     return m
 
-# ========== ОБРАБОТЧИКИ TELEGRAM ==========
+# ========== ОБРАБОТЧИКИ ==========
 @bot.message_handler(commands=['start', 'help'])
 def cmd_start(message):
     if not auth_check(message):
         bot.send_message(message.chat.id, "❌ Доступ запрещён.")
         return
     bot.send_message(message.chat.id,
-        "🦾 <b>RAMSEYE OSINT v6.2</b>\n\n"
-        "🔍 OSINT SEARCH — все инструменты\n"
+        "🦾 <b>RAMSEYE OSINT v6.5</b>\n\n"
+        "🔍 OSINT SEARCH — все инструменты (в потоках)\n"
         "🧠 RAMSEYE AI — Llama 4 Scout\n"
         "📂 DOSSIER — параллельный сбор + AI\n"
         "👇 Выбери действие",
@@ -418,7 +483,7 @@ def on_callback(call):
     }
     clear_step(call.from_user.id)
     set_step(call.from_user.id, call.data)
-    bot.send_message(call.message.chat.id, prompts.get(call.data, "Введи dati:"))
+    bot.send_message(call.message.chat.id, prompts.get(call.data, "Введи данные:"))
 
 @bot.message_handler(content_types=['photo', 'document'])
 def on_media(message):
@@ -428,13 +493,13 @@ def on_media(message):
     if get_step(message.from_user.id) == "exif":
         clear_step(message.from_user.id)
         bot.send_message(message.chat.id, "📷 Извлекаю EXIF...")
+        fpath = f"/tmp/exif_{int(time.time())}.jpg"
         try:
             if message.document:
                 file_info = bot.get_file(message.document.file_id)
             else:
                 file_info = bot.get_file(message.photo[-1].file_id)
             downloaded = bot.download_file(file_info.file_path)
-            fpath = f"/tmp/exif_{int(time.time())}.jpg"
             with open(fpath, 'wb') as f:
                 f.write(downloaded)
             result = extract_exif(fpath)
@@ -465,14 +530,14 @@ def on_text(message):
 
         if step == "maigret":
             if validate_nick(text):
-                result = maigret_lookup(text)
-                send_result(message.chat.id, result, "MAIGRET")
+                bot.send_message(message.chat.id, "⏳ Maigret запущен (до 160 сек)...")
+                threading.Thread(target=maigret_thread, args=(message.chat.id, text), daemon=True).start()
             else:
                 bot.send_message(message.chat.id, "❌ Некорректный ник")
         elif step == "holehe":
             if validate_email(text):
-                result = holehe_lookup(text)
-                send_result(message.chat.id, result, "HOLEHE")
+                bot.send_message(message.chat.id, "⏳ Holehe запущен...")
+                threading.Thread(target=holehe_thread, args=(message.chat.id, text), daemon=True).start()
             else:
                 bot.send_message(message.chat.id, "❌ Некорректный email")
         elif step == "ip":
@@ -489,8 +554,8 @@ def on_text(message):
                 bot.send_message(message.chat.id, "❌ Некорректный IP")
         elif step == "dns":
             if validate_domain(text):
-                result = dns_recon(text)
-                send_result(message.chat.id, result, "DNS")
+                bot.send_message(message.chat.id, "⏳ DNS-разведка запущена...")
+                threading.Thread(target=dns_thread, args=(message.chat.id, text), daemon=True).start()
             else:
                 bot.send_message(message.chat.id, "❌ Некорректный домен")
         elif step == "whois":
@@ -504,11 +569,15 @@ def on_text(message):
             bot.send_message(message.chat.id, result, parse_mode='HTML', disable_web_page_preview=True)
         elif step == "cluster":
             bot.send_message(message.chat.id, "🧠 Анализирую связи...")
-            result = cluster_data(text)
-            send_result(message.chat.id, result, "CLUSTER")
+            threading.Thread(target=cluster_thread, args=(message.chat.id, text), daemon=True).start()
         elif step == "exif":
             bot.send_message(message.chat.id, "📷 Отправь фото файлом")
             set_step(uid, "exif")
+        elif step == "dossier":
+            threading.Thread(target=dossier_thread, args=(message.chat.id, text), daemon=True).start()
+        elif step == "groq":
+            bot.send_message(message.chat.id, "⏳ RamsEye AI думает...")
+            threading.Thread(target=groq_thread, args=(message.chat.id, text), daemon=True).start()
         return
 
     if text == "🔍 OSINT SEARCH":
@@ -521,13 +590,13 @@ def on_text(message):
         bot.send_message(message.chat.id, "📂 Введи цель (ник, email, IP, домен):")
     elif text == "ℹ️ ПОМОЩЬ":
         bot.send_message(message.chat.id,
-            "<b>📖 RamsEye OSINT v6.2</b>\n\n"
-            "👤 Maigret — поиск ника по 500+ соцсетям (160 сек)\n"
-            "📧 Holehe — проверка email по сервисам\n"
+            "<b>📖 RamsEye OSINT v6.5</b>\n\n"
+            "👤 Maigret — поиск ника (160 сек, в потоке)\n"
+            "📧 Holehe — проверка email\n"
             "🌐 IP — геолокация, ISP, VPN/Proxy/Tor\n"
-            "🔭 Shodan — порты, CVE, баннеры\n"
+            "🔭 Shodan — порты, CVE\n"
             "🔍 DNS — A/MX/TXT/NS + субдомены\n"
-            "🌍 WHOIS — регистратор, даты, контакты\n"
+            "🌍 WHOIS — регистратор, даты\n"
             "🕸 Dorks — 12 Google Dorks\n"
             "🧠 Cluster — AI-анализ связей\n"
             "📷 EXIF — GPS и метаданные из фото\n"
@@ -545,7 +614,7 @@ def on_text(message):
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    print("🦾 RamsEye OSINT v6.2 — TIMEOUT 160 sec")
+    print("🦾 RamsEye OSINT v6.5 — FINAL (all threads, groq handler added)")
     if not ADMIN_ID or not TOKEN:
         print("❌ FATAL: задайте ADMIN_ID и TELEGRAM_TOKEN")
         exit(1)
