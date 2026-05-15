@@ -313,7 +313,7 @@ def maigret_lookup(username: str) -> str:
                 lines.append(f"✅ {stripped}")
                 found_count += 1
             elif "[-]" in stripped and found_count == 0:
-                pass  # не засоряем вывод отрицательными
+                pass
         if found_count == 0:
             lines.append("❌ Аккаунты не найдены")
         else:
@@ -335,11 +335,9 @@ def maigret_thread(chat_id: int, username: str):
 #  MAIGRET + AI — глубокий анализ
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def maigret_ai_analysis(username: str, chat_id: int):
-    # Шаг 1: запускаем Maigret
     bot.send_message(chat_id, "🔍 Шаг 1/3: Maigret собирает аккаунты...")
     raw_output = maigret_lookup(username)
 
-    # Шаг 2: извлекаем найденные платформы
     platforms = []
     urls = []
     for line in raw_output.splitlines():
@@ -354,7 +352,6 @@ def maigret_ai_analysis(username: str, chat_id: int):
         f"✅ Шаг 1/3: Maigret завершён. Найдено платформ: {len(platforms)}"
     )
 
-    # Шаг 3: AI-анализ с расширенным промптом
     bot.send_message(chat_id, "🧠 Шаг 2/3: AI анализирует цифровой след...")
 
     context = f"""НИКНЕЙМ ДЛЯ АНАЛИЗА: {username}
@@ -376,7 +373,6 @@ def maigret_ai_analysis(username: str, chat_id: int):
 
     bot.send_message(chat_id, "📋 Шаг 3/3: Формирую итоговый отчёт...")
 
-    # Итоговый отчёт
     report = (
         f"╔══════════════════════════════════════╗\n"
         f"║   RAMSEYE OSINT v7.1 — MAIGRET+AI    ║\n"
@@ -668,13 +664,11 @@ def tg_parse(username: str) -> str:
         desc = soup.find('div', class_='tgme_page_description')
         lines.append(f"📝 Описание: {desc.get_text(strip=True) if desc else 'Нет описания'}")
 
-        # Тип аккаунта
         if soup.find('div', class_='tgme_page_context_link'):
             lines.append("📌 Тип: Канал/Группа")
         else:
             lines.append("📌 Тип: Пользователь/Бот")
 
-        # Счётчик подписчиков если канал
         counter = soup.find('div', class_='tgme_page_extra')
         if counter:
             lines.append(f"👥 Подписчики: {counter.get_text(strip=True)}")
@@ -688,8 +682,7 @@ def tg_parse(username: str) -> str:
 def tg_thread(chat_id: int, username: str):
     send_result(chat_id, tg_parse(username), "TELEGRAM")
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  VK ПАРСИНГ
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━#  VK ПАРСИНГ
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def vk_parse(user_id: str) -> str:
     user_id = user_id.lstrip('@')
@@ -700,23 +693,19 @@ def vk_parse(user_id: str) -> str:
 
         lines = [f"📡 VK: {user_id}\n"]
 
-        # Имя
         name_tag = soup.find('h1', class_='page_name') or \
                    soup.find('div', class_='pv_peer_name') or \
                    soup.find('h2', class_='op_header')
         lines.append(f"👤 Имя: {name_tag.get_text(strip=True) if name_tag else 'Не найдено'}")
 
-        # Статус
         status = soup.find('div', class_='current_info') or \
                  soup.find('div', class_='pv_status')
         lines.append(f"💬 Статус: {status.get_text(strip=True) if status else 'Нет статуса'}")
 
-        # Город
         city = soup.find('div', class_='profile_city')
         if city:
             lines.append(f"🏙 Город: {city.get_text(strip=True)}")
 
-        # Дата рождения
         bdate = soup.find('div', class_='profile_info_row')
         if bdate:
             lines.append(f"📅 Инфо: {bdate.get_text(strip=True)[:100]}")
@@ -1030,6 +1019,7 @@ def on_text(message):
                 ).start()
             else:
                 bot.send_message(message.chat.id, "❌ Некорректный ник")
+            return
 
         elif step == "holehe":
             if validate_email(text):
@@ -1110,6 +1100,7 @@ def on_text(message):
         elif step == "exif":
             bot.send_message(message.chat.id, "📷 Отправь фото файлом (не сжатое)")
             set_step(uid, "exif")
+            return
 
         elif step == "dossier":
             bot.send_message(message.chat.id, "⏳ Запускаю сбор досье...")
