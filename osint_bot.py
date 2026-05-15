@@ -121,7 +121,8 @@ def send_result(chat_id, text, title):
 # ========== MAIGRET (160 секунд) ==========
 def maigret_lookup(username):
     try:
-        result = maigret.search(username, timeout=160)
+        from maigret import search
+        result = search(username, timeout=160)
         if not result:
             return "❌ Ничего не найдено"
         lines = [f"👤 <b>Результаты для {username}</b>\n"]
